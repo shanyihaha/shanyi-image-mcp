@@ -1,7 +1,7 @@
 [project]
-name = "micu-image-mcp"
+name = "shanyi-image-mcp"
 version = "0.1.0"
-description = "MCP server for 米醋 (micuapi.ai) gpt-image-2 / gpt-image-2-pro"
+description = "MCP server for shanyiapi.com gpt-image-2 / gpt-image-2-pro"
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.0.0",
@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-micu-image-mcp = "server:main"
+shanyi-image-mcp = "server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

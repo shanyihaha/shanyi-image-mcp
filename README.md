@@ -1,13 +1,8 @@
-# 米醋画图 MCP
+# 闪艺画图 MCP
 
-把 [米醋](https://www.micuapi.ai) 的图像接口包装成 MCP server，让 Claude Code / Codex / Cursor 等 MCP 客户端直接生图、改图、批处理、多图参考。
+把 [闪艺](https://shanyiapi.com) 的图像接口包装成 MCP server，让 Claude Code / Codex 等 MCP 客户端直接生图、改图、批处理、多图参考。
 
-默认使用 `gpt-image-2` / `gpt-image-2-pro`。可选配置 `MICU_GROK_API_KEY` 后，也能走米醋 Grok 图像通道，当前实测模型包括：
-
-- `grok-imagine-image-lite`
-- `grok-imagine-image`
-- `grok-imagine-image-pro`
-- `grok-imagine-image-edit`
+使用 `gpt-image-2` / `gpt-image-2-pro` 模型（边长 ≥1600 自动切 pro）。
 
 ---
 
@@ -15,57 +10,56 @@
 
 | Tool | 说明 |
 |---|---|
-| `image_generate` | 文生图。米醋 image2 支持 1K / 2K / 4K；Grok 支持 1K / 2K 路由 |
-| `image_edit` | 单图参考/编辑。image2 走 edits 或 `reference_image`；Grok 走 `reference_image` |
-| `image_batch_edit` | 多张图逐张同指令处理 |
-| `image_multi_reference` | 2-10 张参考图融合成 1 张新图；Grok 走 `image_urls` |
+| `image_generate` | 文生图。支持 1K / 2K / 4K；2K/4K 自动切 pro，强制 `n=1` |
+| `image_edit` | 单图参考/编辑。1K 走 `/v1/images/edits`（支持 alpha mask）；2K 走 `reference_image` |
+| `image_batch_edit` | 多张图逐张同指令处理（仅 1K）；non-pro 5 并发，pro 串行 |
+| `image_multi_reference` | 2-10 张参考图融合成 1 张新图 |
 | `server_info` | 查看 base URL、模型、size 规则、重试策略、安全约束 |
 
 第一次使用前，让 LLM 调一次 `server_info`，可以看到当前运行时配置和可用能力。
 
 ---
 
-## Grok 与 GPT Image2 功能差异
-
-| 能力 | `gpt-image-2` / `gpt-image-2-pro` | 米醋 Grok 图像模型 |
-|---|---|---|
-| 默认用途 | 主通道，覆盖文生图、图生图、批量编辑、多图参考 | 可选通道，适合快速文生图、单图参考、多图参考 |
-| 可选模型 | `gpt-image-2`, `gpt-image-2-pro` | `grok-imagine-image-lite`, `grok-imagine-image`, `grok-imagine-image-pro`, `grok-imagine-image-edit` |
-| `image_generate` 文生图 | 支持 1K / 2K / 4K；2K/4K 自动切 pro，强制 `n=1` | 支持 1K / 2K 路由；`n` 会传给后端，实际返回张数以响应为准 |
-| `image_edit` 单图参考/编辑 | 1K 走 `/v1/images/edits`；2K 走 `reference_image`；4K 参考图入口拒绝 | 走 `/v1/images/generations` + `reference_image`；4K 会映射到 `resolution=2k` |
-| 局部 mask | 仅 1K edits multipart 支持 alpha mask；2K 不支持 | 当前不支持 mask，传入会忽略并写入 `notes` |
-| `image_multi_reference` 多图参考 | 2-10 张参考图；1K 稳定，2K 可能 fallback，4K 入口拒绝 | 2-10 张参考图走 `image_urls`；实测可用，按 `resolution` + `aspect_ratio` 映射 |
-| `image_batch_edit` 批量逐张编辑 | 支持 1K；non-pro 5 并发，pro 串行 | 当前不支持 Grok 批量逐张编辑 |
-| size 校验 | `WxH`，边长 256-4096，W/H 必须是 8 的倍数 | 只校验 `WxH` 正整数，不强制 8 倍数和 4096 边长 |
-| 实际输出尺寸 | ≥4MP 通常严格 1:1；≤2.25MP 会被代理处理到约 1.57MP | 不保证等于请求 `WxH`，以 `saved.actual_size` 为准 |
-| 重试/限流 | 2K/4K 使用跨进程锁，避免多个 MCP 同时打 pro 队列 | 不走高分辨率锁；可恢复错误仍自动重试并记录到 `notes` |
-| 配置变量 | `MICU_API_KEY`, `MICU_MODEL`, `MICU_BASEURL` | `MICU_GROK_API_KEY`, `XAI_MODEL`；默认复用 `MICU_BASEURL` |
-
----
-
 ## 一键安装
 
+### Windows（PowerShell）
+
+```powershell
+# 1. 解压收到的 shanyi-image-mcp.zip
+# 2. 进入解压后的目录
+cd C:\path\to\shanyi-image-mcp
+
+# 3. 跑一键安装（交互输入闪艺 sk-key + 输出目录）
+python install.py
+```
+
+### macOS / Linux
+
 ```bash
-git clone https://github.com/Subaru486desuwa/micu-image-mcp.git
-cd micu-image-mcp
+unzip shanyi-image-mcp.zip
+cd shanyi-image-mcp
 python install.py
 ```
 
 脚本会：
 
-1. 检查 Python >= 3.10
-2. 安装依赖
-3. 交互配置米醋 API key、输出目录
-4. 可选配置米醋 Grok 生图 token
-5. 写入 `~/.claude.json` 和 `~/.codex/config.toml`
-6. 启动 server 做一次 initialize 握手
+1. 检查 Python >= 3.10（没装去 https://www.python.org/downloads/ 下）
+2. 安装依赖（mcp / httpx / Pillow）
+3. 交互配置闪艺 API key、输出目录
+4. 写入 `~/.claude.json` 和 `~/.codex/config.toml`（已有配置自动备份）
+5. 启动 server 做一次 initialize 握手验证
 
 非交互安装：
 
+```powershell
+# Windows
+$env:SHANYI_API_KEY="sk-..."; python install.py --yes
+```
+
 ```bash
-MICU_API_KEY=sk-... \
-MICU_GROK_API_KEY=sk-... \
-MICU_SAVE_DIR=~/Pictures/micu-out \
+# macOS / Linux
+SHANYI_API_KEY=sk-... \
+SHANYI_SAVE_DIR=~/Pictures/shanyi-image-out \
 python install.py --yes
 ```
 
@@ -75,50 +69,14 @@ python install.py --yes
 python install.py --no-codex
 python install.py --no-claude
 python install.py --mirror tsinghua
-python install.py --baseurl https://www.micuapi.ai
+python install.py --baseurl https://shanyiapi.com
 ```
 
 安装完成后重启 Claude Code / Codex，让 LLM 调 `server_info` 验证。
 
 ---
 
-## Grok 路径
-
-Grok 走米醋中转，base URL 默认仍是：
-
-```text
-https://www.micuapi.ai
-```
-
-只需要额外配置：
-
-```bash
-MICU_GROK_API_KEY=sk-...
-XAI_MODEL=grok-imagine-image-lite
-MICU_GROK_SIZE_MODE=contain
-```
-
-Grok 的 `size` 不套用 image2 的 8 倍数和 4096 边长约束。本地只检查 `WxH` 格式，然后映射为：
-
-- `resolution`: `1k` 或 `2k`
-- `aspect_ratio`: 最接近的比例，如 `1:1`、`16:9`、`9:16`
-
-注意：Grok 后端返回像素不保证严格等于请求的 `WxH`。MCP 默认会在保存前用 Pillow 把 Grok 输出归一化到请求尺寸，`MICU_GROK_SIZE_MODE` 可选：
-
-| 值 | 行为 |
-|---|---|
-| `contain` | 默认。等比缩放，补边到请求尺寸，不裁主体 |
-| `cover` | 等比缩放并居中裁切，铺满请求尺寸 |
-| `stretch` | 直接拉伸到请求尺寸，可能变形 |
-| `backend` | 不做本地后处理，保留 Grok 后端原始像素 |
-
-建议仍优先用常见比例和不太小的边长，例如 `1024x1024`、`1536x1024`、`1024x1536`、`1501x1001`。过小或很奇异的比例可能被米醋 Grok 后端返回 500，MCP 会自动重试并在 `notes` 里记录。
-
----
-
 ## Size 规则
-
-image2 路径：
 
 - W/H 必须是 8 的倍数
 - W/H 必须在 256 到 4096 范围内
@@ -134,65 +92,68 @@ image2 路径：
 | 2K | `2048x2048`, `2048x1152`, `1152x2048` |
 | 4K | `3840x2160`, `2160x3840` |
 
-Grok 路径：
-
-- 不强制 8 倍数
-- 当前按 1K / 2K 路由
-- 4K 请求会映射到 `resolution=2k`
-
 ---
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `MICU_API_KEY` | 空 | 米醋 image2 token |
-| `MICU_BASEURL` | `https://www.micuapi.ai` | 米醋 base URL |
-| `MICU_MODEL` | `gpt-image-2` | image2 默认模型 |
-| `MICU_GROK_API_KEY` | 空 | 米醋 Grok 图像 token |
-| `XAI_MODEL` | `grok-imagine-image-lite` | Grok 默认模型 |
-| `MICU_GROK_SIZE_MODE` | `contain` | Grok 保存前尺寸归一化策略：`contain` / `cover` / `stretch` / `backend` |
-| `MICU_SAVE_DIR` | `~/Pictures/micu-out` | 默认输出目录 |
-| `MICU_SAVE_DIR_ROOT` | 同输出目录 | 输出安全根目录 |
-| `MICU_USE_SHELL_PROXY` | `0` | 设为 `1` 才读取 shell 代理 |
-
-兼容旧 Grok 变量 `XAI_API_KEY` / `GROK_API_KEY`，但推荐新配置统一使用 `MICU_GROK_API_KEY`。
+| `SHANYI_API_KEY` | 空 | 闪艺 API token |
+| `SHANYI_BASEURL` | `https://shanyiapi.com` | 闪艺 base URL |
+| `SHANYI_MODEL` | `gpt-image-2` | 默认模型 |
+| `SHANYI_SAVE_DIR` | `~/Pictures/shanyi-image-out` | 默认输出目录 |
+| `SHANYI_SAVE_DIR_ROOT` | 同输出目录 | 输出安全根目录（沙箱） |
+| `SHANYI_USE_SHELL_PROXY` | `0` | 设为 `1` 才让 httpx 读取 shell 代理 |
 
 ---
 
 ## 手动配置
 
-Claude Code:
+Claude Code (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
-    "micu-image": {
+    "shanyi-image": {
       "command": "/path/to/python",
-      "args": ["/absolute/path/to/micu-image-mcp/server.py"],
+      "args": ["/absolute/path/to/shanyi-image-mcp/server.py"],
       "env": {
-        "MICU_API_KEY": "sk-...",
-        "MICU_GROK_API_KEY": "sk-...",
-        "MICU_SAVE_DIR": "/Users/you/Pictures/micu-out",
-        "MICU_SAVE_DIR_ROOT": "/Users/you/Pictures/micu-out",
-        "XAI_MODEL": "grok-imagine-image-lite"
+        "SHANYI_API_KEY": "sk-...",
+        "SHANYI_SAVE_DIR": "/Users/you/Pictures/shanyi-image-out",
+        "SHANYI_SAVE_DIR_ROOT": "/Users/you/Pictures/shanyi-image-out"
       }
     }
   }
 }
 ```
 
-Codex:
+Codex (`~/.codex/config.toml`):
 
 ```toml
-[mcp_servers.micu-image]
+[mcp_servers.shanyi-image]
 command = "/path/to/python"
-args = ["/absolute/path/to/micu-image-mcp/server.py"]
+args = ["/absolute/path/to/shanyi-image-mcp/server.py"]
 
-[mcp_servers.micu-image.env]
-MICU_API_KEY = "sk-..."
-MICU_GROK_API_KEY = "sk-..."
-MICU_SAVE_DIR = "/Users/you/Pictures/micu-out"
-MICU_SAVE_DIR_ROOT = "/Users/you/Pictures/micu-out"
-XAI_MODEL = "grok-imagine-image-lite"
+[mcp_servers.shanyi-image.env]
+SHANYI_API_KEY = "sk-..."
+SHANYI_SAVE_DIR = "/Users/you/Pictures/shanyi-image-out"
+SHANYI_SAVE_DIR_ROOT = "/Users/you/Pictures/shanyi-image-out"
 ```
+
+---
+
+## 重试与限流
+
+- **1K**：失败 → 4s + jitter → 重试 → 8s + jitter → 重试（共 3 次尝试）；网络层异常额外免费重试 1 次
+- **2K/4K**：双层锁（进程内 asyncio.Semaphore(1) + 跨进程文件锁 `~/.cache/shanyi-image/bigsize.lock`），可恢复 5xx 60s 后重试 1 次；Cloudflare 524 fail fast 不重试
+- **4K 图生图 / 多图参考**已禁用（origin 处理 > 120s 撞 CF 上限）
+
+---
+
+## 安全约束
+
+- 所有输出强制落在 `SHANYI_SAVE_DIR_ROOT` 之下，传出根目录的路径会被拒
+- 输入图按 magic bytes 校验为 PNG/JPEG/WebP/GIF；非图片立即拒
+- 单输入图 ≤ 4MB；多图参考累计 ≤ 8MB
+- baseurl 锁在启动期 env，运行期 tool 不接受参数（防 key 外泄到攻击者 host）
+- basename 仅允许 `[A-Za-z0-9_-.]`，禁含 `/` `..` 和路径分量

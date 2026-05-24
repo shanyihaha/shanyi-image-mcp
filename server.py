@@ -1,7 +1,7 @@
-"""米醋 gpt-image-2 MCP server.
+"""闪艺 gpt-image-2 MCP server.
 
-把 米醋画图 网页里跑通的代理路由策略移植到 MCP，让 Claude Code 直接调起来。
-关键策略沿用米醋画图网页版（gpt-image2 工具）实测得到的路由 / 重试 / 限流规则。
+把 闪艺画图 网页里跑通的代理路由策略移植到 MCP，让 Claude Code 直接调起来。
+关键策略沿用闪艺画图网页版（gpt-image2 工具）实测得到的路由 / 重试 / 限流规则。
 """
 from __future__ import annotations
 
@@ -37,65 +37,26 @@ except ImportError:
 _FILE_LOCK_AVAILABLE = _LOCK_BACKEND != "none"
 
 # ---------- 配置（env 可覆盖）----------
-DEFAULT_BASEURL = os.environ.get("MICU_BASEURL", "https://www.micuapi.ai")
-API_KEY = os.environ.get("MICU_API_KEY", "")
-DEFAULT_MODEL = os.environ.get("MICU_MODEL", "gpt-image-2")
-GROK_BASEURL = os.environ.get("MICU_GROK_BASEURL", DEFAULT_BASEURL)
-GROK_API_KEY = os.environ.get(
-    "MICU_GROK_API_KEY",
-    os.environ.get("XAI_API_KEY", os.environ.get("GROK_API_KEY", "")),
-)
-XAI_MODEL = os.environ.get("XAI_MODEL", os.environ.get("GROK_MODEL", "grok-imagine-image-lite"))
-GROK_SIZE_MODE = os.environ.get("MICU_GROK_SIZE_MODE", "contain").strip().lower()
-# 米醋是国内站，不应走 shell 的 SOCKS/HTTP 代理；默认 trust_env=False。
-# 设 MICU_USE_SHELL_PROXY=1 才让 httpx 拾取 HTTPS_PROXY/HTTP_PROXY/ALL_PROXY。
-_TRUST_ENV = os.environ.get("MICU_USE_SHELL_PROXY", "").strip() in ("1", "true", "yes")
+DEFAULT_BASEURL = os.environ.get("SHANYI_BASEURL", "https://shanyiapi.com")
+API_KEY = os.environ.get("SHANYI_API_KEY", "")
+DEFAULT_MODEL = os.environ.get("SHANYI_MODEL", "gpt-image-2")
+# 闪艺是国内站，不应走 shell 的 SOCKS/HTTP 代理；默认 trust_env=False。
+# 设 SHANYI_USE_SHELL_PROXY=1 才让 httpx 拾取 HTTPS_PROXY/HTTP_PROXY/ALL_PROXY。
+_TRUST_ENV = os.environ.get("SHANYI_USE_SHELL_PROXY", "").strip() in ("1", "true", "yes")
 
 # save_dir 的安全根目录：tool 调用方无论传什么 save_dir，都不能写到此根之外。
-# 默认 = 用户家目录下的 Pictures/micu-out；可用 MICU_SAVE_DIR_ROOT 覆盖。
+# 默认 = 用户家目录下的 Pictures/shanyi-image-out；可用 SHANYI_SAVE_DIR_ROOT 覆盖。
 _SAVE_ROOT = Path(os.environ.get(
-    "MICU_SAVE_DIR_ROOT",
-    str(Path.home() / "Pictures" / "micu-out"),
+    "SHANYI_SAVE_DIR_ROOT",
+    str(Path.home() / "Pictures" / "shanyi-image-out"),
 )).expanduser().resolve()
 
 # DEFAULT_SAVE_DIR 必须默认与 _SAVE_ROOT 一致，否则手动起 server（不走 install.py）
 # 时会触发 _resolve_save_dir 把 cwd/out 重定向到 _SAVE_ROOT，对用户是静默的坑。
-DEFAULT_SAVE_DIR = Path(os.environ.get("MICU_SAVE_DIR", str(_SAVE_ROOT)))
+DEFAULT_SAVE_DIR = Path(os.environ.get("SHANYI_SAVE_DIR", str(_SAVE_ROOT)))
 
 PRO_MODEL = "gpt-image-2-pro"
 NONPRO_MODEL = "gpt-image-2"
-GROK_MODEL_ALIASES = {
-    "grok-imagine-image",
-    "grok-imagine-image-lite",
-    "grok-imagine-image-quality",
-    "grok-imagine-image-quality-20260403",
-    "grok-imagine-image-quality-latest",
-    "grok-imagine-image-pro",
-    "grok-imagine-image-edit",
-}
-GROK_AVAILABLE_MODELS = [
-    "grok-imagine-image-lite",
-    "grok-imagine-image",
-    "grok-imagine-image-pro",
-    "grok-imagine-image-edit",
-]
-GROK_ASPECT_RATIO_CHOICES = {
-    "1:1": 1.0,
-    "16:9": 16 / 9,
-    "9:16": 9 / 16,
-    "4:3": 4 / 3,
-    "3:4": 3 / 4,
-    "3:2": 3 / 2,
-    "2:3": 2 / 3,
-    "2:1": 2 / 1,
-    "1:2": 1 / 2,
-    "19.5:9": 19.5 / 9,
-    "9:19.5": 9 / 19.5,
-    "20:9": 20 / 9,
-    "9:20": 9 / 20,
-    "auto": 1.0,
-}
-GROK_SIZE_MODES = {"backend", "contain", "cover", "stretch"}
 
 # 网页里实测出的阈值：max edge ≥1600 视为 2K/4K，必须走 pro，且图生图绕开 /v1/images/edits
 HIGH_RES_EDGE = 1600
@@ -112,7 +73,7 @@ VALID_SIZES_4K = {"3840x2160", "2160x3840"}
 MAX_N = 10
 MIN_SIZE_EDGE = 256
 MAX_SIZE_EDGE = 4096
-SIZE_ALIGNMENT = 8  # 米醋实测接受 8 倍数（1080/720 通过，1500 等非 8 倍 400）
+SIZE_ALIGNMENT = 8  # 闪艺实测接受 8 倍数（1080/720 通过，1500 等非 8 倍 400）
 
 MAX_INPUT_FILE_BYTES = 4 * 1024 * 1024     # 单张输入图 4MB
 MAX_TOTAL_INPUT_BYTES = 8 * 1024 * 1024    # 多图总和 8MB（base64 后约 11MB，逼近代理上限）
@@ -147,22 +108,8 @@ def _size_tier(size: str) -> str:
     return "4k"
 
 
-def _is_grok_model(model: str | None) -> bool:
-    if not model:
-        return False
-    m = model.strip().lower()
-    return m in GROK_MODEL_ALIASES or m.startswith("grok-")
-
-
-def _grok_size_mode() -> str:
-    """Grok 后端不保证精确 WxH；这里控制保存前的本地尺寸归一化。"""
-    if GROK_SIZE_MODE in GROK_SIZE_MODES:
-        return GROK_SIZE_MODE
-    return "contain"
-
-
 def _reject_4k_with_reference(size: str, tool: str) -> str | None:
-    """≥4K image_edit / image_multi_reference 在米醋后端稳定 > 120s，撞 CF Proxy Read Timeout (524)；入口直接拒。
+    """≥4K image_edit / image_multi_reference 在闪艺后端稳定 > 120s，撞 CF Proxy Read Timeout (524)；入口直接拒。
 
     image_generate 4K 是无参考的纯文生图，~50-80s 能过，不在此拦截范围。
     """
@@ -182,8 +129,6 @@ def _resolve_model(requested_model: str | None, size: str) -> tuple[str, list[st
     notes: list[str] = []
     tier = _size_tier(size)
     model = requested_model or DEFAULT_MODEL
-    if _is_grok_model(model):
-        return model, notes
     if tier in ("2k", "4k") and "pro" not in model.lower():
         notes.append(f"size={size} ({tier}) 仅 pro 支持，已自动切到 {PRO_MODEL}")
         model = PRO_MODEL
@@ -204,7 +149,7 @@ def _validate_size(size: str | None, *, allow_none: bool = True) -> tuple[str | 
       - None 允许（image_generate 走 prompt 推断兜底）
       - 必须形如 "WxH"，W/H 都为正整数
       - W/H 都在 [256, 4096]
-      - W/H 必须是 8 的倍数（米醋实测约束）
+      - W/H 必须是 8 的倍数（闪艺实测约束）
     """
     if size is None:
         if allow_none:
@@ -224,25 +169,7 @@ def _validate_size(size: str | None, *, allow_none: bool = True) -> tuple[str | 
     if w > MAX_SIZE_EDGE or h > MAX_SIZE_EDGE:
         return None, f"size 边长太大（最大 {MAX_SIZE_EDGE}），收到 {size}"
     if w % SIZE_ALIGNMENT != 0 or h % SIZE_ALIGNMENT != 0:
-        return None, f"size W/H 必须是 {SIZE_ALIGNMENT} 的倍数（米醋代理约束），收到 {size}"
-    return f"{w}x{h}", None
-
-
-def _validate_grok_size(size: str | None, *, allow_none: bool = True) -> tuple[str | None, str | None]:
-    """Grok 路径只做格式校验，不套用 MICU 的 8 倍数和 4K 约束。"""
-    if size is None:
-        if allow_none:
-            return None, None
-        return None, "size 不能为 None（此 tool 必须传明确 size）"
-    if not isinstance(size, str):
-        return None, f"size 必须是字符串，收到 {type(size).__name__}"
-    s = size.strip().lower()
-    m = re.match(r"^(\d+)x(\d+)$", s)
-    if not m:
-        return None, f"size 格式错误：必须是 'WxH'（如 '1024x1024'），收到 {size!r}"
-    w, h = int(m.group(1)), int(m.group(2))
-    if w <= 0 or h <= 0:
-        return None, f"size W/H 必须为正数，收到 {size}"
+        return None, f"size W/H 必须是 {SIZE_ALIGNMENT} 的倍数（闪艺代理约束），收到 {size}"
     return f"{w}x{h}", None
 
 
@@ -295,7 +222,7 @@ def _resolve_save_dir(save_dir: str | None) -> tuple[Path | None, str | None]:
     except (ValueError, OSError):
         return None, (
             f"save_dir 必须在安全根目录 {_SAVE_ROOT} 之下；收到 {save_dir!r}。"
-            f"留空让 MCP 用默认目录，或先把 MICU_SAVE_DIR_ROOT 改到你想要的位置。"
+            f"留空让 MCP 用默认目录，或先把 SHANYI_SAVE_DIR_ROOT 改到你想要的位置。"
         )
     return resolved, None
 
@@ -469,7 +396,7 @@ def _normalized_image_bytes_sync(raw: bytes, requested_size: str, mode: str) -> 
         from PIL import Image, ImageOps  # type: ignore[import-not-found]
     except ImportError as e:
         raise ImageSaveError(
-            "Grok 精确尺寸后处理需要 Pillow。请重新运行 install.py，或设置 MICU_GROK_SIZE_MODE=backend 关闭后处理。"
+            "尺寸归一化需要 Pillow。请重新运行 install.py 安装 Pillow，或关闭后处理。"
         ) from e
 
     tw, th = target
@@ -515,7 +442,7 @@ async def _maybe_normalize_image_bytes(
     normalized, after = await asyncio.to_thread(_normalized_image_bytes_sync, raw, requested_size, mode)
     if before and after and before != after and notes is not None:
         notes.append(
-            f"{label} 后端返回 {before[0]}x{before[1]}，已按 MICU_GROK_SIZE_MODE={mode} "
+            f"{label} 后端返回 {before[0]}x{before[1]}，已按 mode={mode} "
             f"本地后处理为 {after[0]}x{after[1]}。"
         )
     return normalized
@@ -631,9 +558,9 @@ async def _save_image_url(
 
 
 def _round_to_alignment(n: int) -> int:
-    """米醋代理实测 W/H 接受 8 的倍数（1080/720 等通过）。
+    """闪艺代理实测 W/H 接受 8 的倍数（1080/720 等通过）。
 
-    OpenAI 官方文档说 16 倍数，但米醋代理更宽容；用 8 对齐既兼容常见视频尺寸（1920x1080 / 720）
+    OpenAI 官方文档说 16 倍数，但闪艺代理更宽容；用 8 对齐既兼容常见视频尺寸（1920x1080 / 720）
     又不会过度修正用户意图（不会把 1080 改成 1088）。
     """
     return max(16, round(n / 8) * 8)
@@ -722,35 +649,15 @@ def _size_note(requested: str, actual: tuple[int, int] | None) -> str | None:
     if rmp <= 2.25 and 1.3 <= amp <= 1.8:
         if rmp <= 1.57:
             return (
-                f"ℹ 实际 {aw}×{ah} ({amp:.2f}MP) > 请求 {rw}×{rh} ({rmp:.2f}MP)：米醋对 ≤2.25MP 的请求等比放大到 ~1.57MP（福利档）。"
+                f"ℹ 实际 {aw}×{ah} ({amp:.2f}MP) > 请求 {rw}×{rh} ({rmp:.2f}MP)：闪艺对 ≤2.25MP 的请求等比放大到 ~1.57MP（福利档）。"
             )
         return (
-            f"⚠ 实际 {aw}×{ah} ({amp:.2f}MP) < 请求 {rw}×{rh} ({rmp:.2f}MP)：米醋对 ≤2.25MP 的请求统一压到 ~1.57MP（福利档降级）。"
+            f"⚠ 实际 {aw}×{ah} ({amp:.2f}MP) < 请求 {rw}×{rh} ({rmp:.2f}MP)：闪艺对 ≤2.25MP 的请求统一压到 ~1.57MP（福利档降级）。"
             f"想拿到真分辨率请改用 ≥4MP 的 size（如 2048×1152、1152×2048、2048×2048、3840×2160）。"
         )
     return (
         f"⚠ 实际 {aw}×{ah} ({amp:.2f}MP) ≠ 请求 {rw}×{rh} ({rmp:.2f}MP)；如非 chat 路径请检查模型与 size 是否匹配。"
     )
-
-
-def _grok_aspect_ratio(size: str) -> str:
-    p = _parse_size(size)
-    if not p:
-        return "1:1"
-    w, h = p
-    ratio = w / h
-    best_name = "1:1"
-    best_delta = float("inf")
-    for name, value in GROK_ASPECT_RATIO_CHOICES.items():
-        delta = abs(ratio - value)
-        if delta < best_delta:
-            best_delta = delta
-            best_name = name
-    return best_name
-
-
-def _grok_resolution(size: str) -> str:
-    return "2k" if _max_edge(size) >= HIGH_RES_EDGE else "1k"
 
 
 async def _save_first_payload_from_response(
@@ -803,7 +710,7 @@ async def _save_first_payload_from_response(
 
 
 def _extract_image_payload(resp: dict | str) -> tuple[str | None, str | None]:
-    """从米醋响应里提取 (b64, url)；二者至少有一个。"""
+    """从闪艺响应里提取 (b64, url)；二者至少有一个。"""
     if isinstance(resp, str):
         return None, None
     # /v1/images/generations & /v1/images/edits 标准格式
@@ -834,7 +741,7 @@ def _extract_image_payload(resp: dict | str) -> tuple[str | None, str | None]:
 
 
 def _extract_image_payloads(resp: dict | str) -> list[tuple[str | None, str | None]]:
-    """提取一组图像 payload。Grok 批量生成时会返回多张。"""
+    """提取一组图像 payload；image_generate 批量请求时一次返回多张。"""
     if isinstance(resp, str):
         return []
     data = resp.get("data") if isinstance(resp, dict) else None
@@ -1043,7 +950,7 @@ def _append_retry_note(
         detail = f"；原因：{detail}"
     notes_out.append(f"HTTP {status} 可重试，等待 {delay:.1f}s 后第 {next_attempt} 次尝试{detail}")
 
-# ≥2K 在米醋 origin 走 pro 模型串行队列，单张渲染 ~50-80s。
+# ≥2K 在闪艺 origin 走 pro 模型串行队列，单张渲染 ~50-80s。
 # 客户端并发 N 张时第 2 张就要排队等前一张，累积容易撞 CF 120s 硬上限 → 524 雪球。
 #
 # 双层锁：
@@ -1055,7 +962,7 @@ _BIG_SIZE_LOCK: asyncio.Semaphore | None = None
 # 跨进程锁文件位置：固定 ~/.cache 下的 user-scoped 路径。
 # 不用 tempfile.gettempdir() 是因为 Mac launchd 给 GUI 进程的 TMPDIR 与 terminal 进程不同
 # (/var/folders/<hash>/T/ vs /tmp/...)，会让 GUI 启动的 Claude Code 与 terminal MCP 锁不同文件。
-_BIG_SIZE_FILE_LOCK_PATH = Path.home() / ".cache" / "micu-image" / "bigsize.lock"
+_BIG_SIZE_FILE_LOCK_PATH = Path.home() / ".cache" / "shanyi-image" / "bigsize.lock"
 
 
 def _get_big_size_lock() -> asyncio.Semaphore:
@@ -1240,23 +1147,14 @@ def _error_detail(text: str) -> str:
 
 # ---------- MCP 主体 ----------
 
-mcp = FastMCP("micu-image")
+mcp = FastMCP("shanyi-image")
 
 
 def _get_key(override: str | None) -> str:
     key = (override or "").strip() or API_KEY
     if not key:
         raise RuntimeError(
-            "未配置 API key。请设置 MICU_API_KEY 环境变量，或在调用时传 api_key 参数。"
-        )
-    return key
-
-
-def _get_grok_key(override: str | None) -> str:
-    key = (override or "").strip() or GROK_API_KEY
-    if not key:
-        raise RuntimeError(
-            "未配置米醋 Grok API key。请设置 MICU_GROK_API_KEY 环境变量，或在调用时传 api_key 参数。"
+            "未配置 API key。请设置 SHANYI_API_KEY 环境变量，或在调用时传 api_key 参数。"
         )
     return key
 
@@ -1264,10 +1162,6 @@ def _get_grok_key(override: str | None) -> str:
 def _get_baseurl() -> str:
     """baseurl 锁在启动时的 env，运行期 tool 不接受覆盖（防 API key 外泄到攻击者 host）。"""
     return DEFAULT_BASEURL
-
-
-def _get_grok_baseurl() -> str:
-    return GROK_BASEURL
 
 
 @mcp.tool()
@@ -1280,7 +1174,7 @@ async def image_generate(
     basename: str | None = None,
     api_key: str | None = None,
 ) -> dict[str, Any]:
-    """文本生成图像（text-to-image）。米醋代理 + gpt-image-2 系列。
+    """文本生成图像（text-to-image）。闪艺代理 + gpt-image-2 系列。
 
     [WHAT] 把一段文字 prompt 渲染成 1 张或 N 张图像，落盘到本地。
 
@@ -1298,7 +1192,7 @@ async def image_generate(
       - 用户提到"高清/4K/海报/壁纸" → "3840x2160"（横）或 "2160x3840"（竖），自动用 pro。
       - 用户提到"FullHD/1080p/横屏视频封面" → "2048x1152"（横）或 "1152x2048"（竖），跨过 2.25MP 阈值。
       - **pro 与非 pro 价格一致** —— 想要真分辨率请直接拉高 size，1920×1080 这种 ≤2.25MP 的会被压成 ~1.57MP。
-      - W 与 H 必须都是 8 的倍数（米醋实测约束；OpenAI 官方要 16，米醋更宽容）。
+      - W 与 H 必须都是 8 的倍数（闪艺实测约束；OpenAI 官方要 16，闪艺更宽容）。
       - ≤2.25MP 的请求都被代理压到 ~1.57MP；要真实分辨率必须 ≥4MP（即 2048² 或更大）。
 
     [PROMPT 写法建议]
@@ -1308,7 +1202,7 @@ async def image_generate(
     Args:
         prompt: 图像描述。1-2000 字符。例："A minimalist sushi mascot logo, soft pastel palette".
         size: "WxH" 字符串或 None。**留 None 让 MCP 从 prompt 推**（弱 LLM 兜底用）；
-              强 LLM 已知偏好时**直接显式传**更准。W 和 H 都必须是 8 的倍数（米醋约束）。常用：
+              强 LLM 已知偏好时**直接显式传**更准。W 和 H 都必须是 8 的倍数（闪艺约束）。常用：
               "1024x1024" "1280x720" "1024x1536" "1536x1024" "720x1280"        ← 1K 档（被压到 1.57MP）
               "1920x1080" "1080x1920"                                          ← 名义 2K 但 ≤2.25MP，被压到 1.57MP
               "2048x2048" "2048x1152" "1152x2048"                              ← 真 2K 档（仅 pro，≥4MP 严格 1:1）
@@ -1317,11 +1211,11 @@ async def image_generate(
         n: 张数 1-10。1K 时 N>1 自动 5 并发；≥2K 强制 N=1（代理限流）。默认 1。
         model: 显式指定模型。留空时按 size 自动选（max edge ≥1600 用 pro，否则 non-pro）。
               可选值："gpt-image-2"（快、便宜）/ "gpt-image-2-pro"（高细节、≥2K 必需）。
-        save_dir: 输出目录。**必须在安全根目录 MICU_SAVE_DIR_ROOT 之下**（默认 ~/Pictures/micu-out）；
+        save_dir: 输出目录。**必须在安全根目录 SHANYI_SAVE_DIR_ROOT 之下**（默认 ~/Pictures/shanyi-image-out）；
                   传 root 之外路径会被拒。留空使用默认。
         basename: 文件名前缀（不带扩展名），仅允许 [A-Za-z0-9_\\-.]。
                   含 / .. 或路径分量会被拒。默认 "gen_<ns_timestamp>"。
-        api_key: 覆盖 MICU_API_KEY 环境变量。一般留空。
+        api_key: 覆盖 SHANYI_API_KEY 环境变量。一般留空。
                  注意：base_url 已锁在启动时 env，运行期不接受 tool 参数（防 key 外泄到攻击者 host）。
 
     Returns: dict 含以下字段：
@@ -1344,9 +1238,9 @@ async def image_generate(
         image_generate(prompt="cute sticker of a cat", size="1024x1024", n=4)
 
     Common errors and what to do:
-        "size W/H 必须是 8 的倍数" → 客户端入口拒，改 size 即可（OpenAI 端有时返回"divisible by 16" 提示，米醋 8 倍数已能过）。
+        "size W/H 必须是 8 的倍数" → 客户端入口拒，改 size 即可（OpenAI 端有时返回"divisible by 16" 提示，闪艺 8 倍数已能过）。
         "HTTP 524: timeout" → 已自动重试 3 次仍失败，建议改小 size 或稍后再试。
-        "未配置 API key" → 设置 MICU_API_KEY 环境变量或传 api_key 参数。
+        "未配置 API key" → 设置 SHANYI_API_KEY 环境变量或传 api_key 参数。
     """
     # === 入口校验（一条条 return 错误，不再静默 ok=False）===
     if not isinstance(prompt, str) or not prompt.strip():
@@ -1372,11 +1266,7 @@ async def image_generate(
         else:
             size = "1024x1024"
             inferred_note = "size=None → 无关键字命中，用默认 1024x1024"
-    use_grok = _is_grok_model(model or DEFAULT_MODEL)
-    if use_grok:
-        cleaned_size, size_err = _validate_grok_size(size, allow_none=False)
-    else:
-        cleaned_size, size_err = _validate_size(size, allow_none=False)
+    cleaned_size, size_err = _validate_size(size, allow_none=False)
     if size_err:
         return {"ok": False, "error": size_err, "errors": [size_err]}
     size = cleaned_size  # type: ignore[assignment]
@@ -1384,115 +1274,14 @@ async def image_generate(
     eff_model, notes = _resolve_model(model, size)
     if inferred_note:
         notes.insert(0, inferred_note)
-    use_grok = _is_grok_model(eff_model)
-    if use_grok:
-        key = _get_grok_key(api_key)
-        baseurl = _get_grok_baseurl()
-        if n > 1:
-            notes.append(f"Grok 路径保留请求的 n={n}")
-    else:
-        key = _get_key(api_key)
-        baseurl = _get_baseurl()
+    key = _get_key(api_key)
+    baseurl = _get_baseurl()
     tier = _size_tier(size)
-    if not use_grok and tier in ("2k", "4k") and n > 1:
+    if tier in ("2k", "4k") and n > 1:
         notes.append(f"{tier.upper()} 强制 N=1，已忽略请求的 n={n}")
         n = 1
     is_pro = "pro" in eff_model.lower()
     stem = safe_stem or _default_basename("gen")
-
-    if use_grok:
-        if tier == "4k":
-            notes.append(f"Grok 路径仅支持 1K / 2K，已将 size={size} 映射到 resolution=2k")
-        size_mode = _grok_size_mode()
-        if size_mode == "backend":
-            notes.append("Grok 尺寸模式 MICU_GROK_SIZE_MODE=backend：保留后端原始像素。")
-        else:
-            notes.append(
-                f"Grok 后端只按 resolution/aspect_ratio 生成；保存前会按 MICU_GROK_SIZE_MODE={size_mode} "
-                f"本地归一化到请求 size={size}。"
-            )
-        aspect_ratio = _grok_aspect_ratio(size)
-        if aspect_ratio == "auto":
-            notes.append(f"Grok 路径对 size={size} 的比例未找到精确匹配，已使用 auto")
-        grok_ep = Endpoint(
-            url=f"{baseurl}/v1/images/generations",
-            json_body={
-                "model": eff_model,
-                "prompt": prompt,
-                "n": n,
-                "resolution": _grok_resolution(size),
-                "aspect_ratio": aspect_ratio,
-                "response_format": "b64_json",
-            },
-        )
-        status, text = await _call_with_retry(
-            grok_ep, key, retry_pro=True, stream=False,
-            big_size_lock=False, notes_out=notes,
-        )
-        if not (200 <= status < 300):
-            return {
-                "ok": False,
-                "error": f"HTTP {status}: {_error_detail(text)}",
-                "errors": [f"HTTP {status}: {_error_detail(text)}"],
-                "model": eff_model,
-                "size": size,
-                "requested_n": n,
-                "notes": notes,
-            }
-
-        resp = _parse_response(text)
-        payloads = _extract_image_payloads(resp)
-        saved: list[dict[str, Any]] = []
-        errors: list[str] = []
-        for idx, (b64, url) in enumerate(payloads[:n]):
-            try:
-                if b64:
-                    p, actual, size_bytes = await _save_image_b64(
-                        b64,
-                        out_dir,
-                        f"{stem}_{idx + 1}",
-                        normalize_size=size,
-                        normalize_mode=size_mode,
-                        notes=notes,
-                        normalize_label="Grok 文生图",
-                    )
-                elif url:
-                    p, actual, size_bytes = await _save_image_url(
-                        url,
-                        out_dir,
-                        f"{stem}_{idx + 1}",
-                        normalize_size=size,
-                        normalize_mode=size_mode,
-                        notes=notes,
-                        normalize_label="Grok 文生图",
-                    )
-                else:
-                    errors.append(f"#{idx + 1} 响应里未找到图片")
-                    continue
-            except Exception as e:  # noqa: BLE001
-                errors.append(f"#{idx + 1} 保存失败: {e}")
-                continue
-            entry: dict[str, Any] = {
-                "index": idx + 1,
-                "path": str(p.resolve()),
-                "size_bytes": size_bytes,
-            }
-            if actual:
-                entry["actual_size"] = f"{actual[0]}x{actual[1]}"
-                entry["actual_megapixels"] = round(actual[0] * actual[1] / 1_000_000, 2)
-                sn = _size_note(size, actual)
-                if sn and sn not in notes:
-                    notes.append(sn)
-            saved.append(entry)
-        return {
-            "ok": bool(saved),
-            "model": eff_model,
-            "size": size,
-            "requested_n": n,
-            "saved": saved,
-            "errors": errors,
-            "notes": notes,
-        }
 
     # 实测：generations 端点对所有 size 都尊重宽高比；
     #   - ≤2.25MP 请求被代理统一处理到 ~1.57MP（≤1.57MP 是等比放大福利；1.57~2.25MP 是压缩降级，如 1920×1080→1672×941）
@@ -1513,7 +1302,7 @@ async def image_generate(
 
     saved: list[dict] = []
     errors: list[str] = []
-    # 客户端循环 N 次单图请求（米醋 image_generation tool 不接受 n 字段）。
+    # 客户端循环 N 次单图请求（闪艺 image_generation tool 不接受 n 字段）。
     # ≥2K 一律给 retry_pro=True 让 524/超时被重试（不仅 pro，size tier 也触发）
     aggressive_retry = is_pro or tier in ("2k", "4k")
     # 并发策略（与 image_batch_edit 对齐）：
@@ -1536,7 +1325,7 @@ async def image_generate(
                 json_body={
                     "model": eff_model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "size": size,  # 米醋接受但 chat 路径下不生效
+                    "size": size,  # 闪艺接受但 chat 路径下不生效
                 },
             )
             chat_status, chat_text = await _call_with_retry(
@@ -1634,9 +1423,9 @@ async def image_edit(
     [路由实现]（实测确定，双路径）
       - 1K（边长 ≤1536）：走 /v1/images/edits multipart，**支持 alpha mask**。
         失败 fallback 到 /v1/chat/completions stream。
-      - 2K（边长 1600–2999）：走 /v1/images/generations + 米醋扩展字段 reference_image=data_url。
+      - 2K（边长 1600–2999）：走 /v1/images/generations + 闪艺扩展字段 reference_image=data_url。
         size 真实生效（实测 2048² 真 2048²）。
-        **此路径不支持 mask**（米醋扩展字段不接受 mask）；如需 mask 请降到 1K。
+        **此路径不支持 mask**（闪艺扩展字段不接受 mask）；如需 mask 请降到 1K。
       - 自动锁 pro：max edge ≥1600 → gpt-image-2-pro。
 
     [MASK 工作原理]（仅 1K 路径）
@@ -1656,9 +1445,9 @@ async def image_edit(
               "3840x2160" / "2160x3840"  ← 4K 已禁用（撞 CF 524 物理上限），传入直接拒
               默认 "1024x1024"。
         model: "gpt-image-2"（默认）/ "gpt-image-2-pro"（≥2K 自动切）。
-        save_dir: 输出目录（必须在安全根目录之下）。默认 ~/Pictures/micu-out 或 MICU_SAVE_DIR。
+        save_dir: 输出目录（必须在安全根目录之下）。默认 ~/Pictures/shanyi-image-out 或 SHANYI_SAVE_DIR。
         basename: 文件名前缀（仅 [A-Za-z0-9_-.]）。默认 "edit_<ns_ts>"。
-        api_key: 覆盖 MICU_API_KEY；base_url 已锁在启动期 env，运行期不接受。
+        api_key: 覆盖 SHANYI_API_KEY；base_url 已锁在启动期 env，运行期不接受。
 
     Returns: dict 含：
         ok (bool): 是否成功。
@@ -1686,15 +1475,11 @@ async def image_edit(
     # === 入口校验 ===
     if not isinstance(prompt, str) or not prompt.strip():
         return {"ok": False, "error": "prompt 不能为空", "errors": ["prompt 不能为空"]}
-    use_grok_request = _is_grok_model(model or DEFAULT_MODEL)
-    if use_grok_request:
-        cleaned_size, size_err = _validate_grok_size(size, allow_none=False)
-    else:
-        cleaned_size, size_err = _validate_size(size, allow_none=False)
+    cleaned_size, size_err = _validate_size(size, allow_none=False)
     if size_err:
         return {"ok": False, "error": size_err, "errors": [size_err]}
     size = cleaned_size  # type: ignore[assignment]
-    if not use_grok_request and (rej := _reject_4k_with_reference(size, "image_edit")):
+    if (rej := _reject_4k_with_reference(size, "image_edit")):
         return {"ok": False, "error": rej, "errors": [rej]}
     safe_stem = _safe_basename(basename) if basename is not None else None
     if basename is not None and safe_stem is None:
@@ -1710,75 +1495,6 @@ async def image_edit(
         return {"ok": False, "error": img_err, "errors": [img_err]}
 
     eff_model, notes = _resolve_model(model, size)
-    if _is_grok_model(eff_model):
-        key = _get_grok_key(api_key)
-        baseurl = _get_grok_baseurl()
-        stem = safe_stem or _default_basename("edit")
-        size_mode = _grok_size_mode()
-        notes.append(
-            "Grok 图生图走 /v1/images/generations + reference_image；"
-            "size 只映射为 resolution/aspect_ratio，实际像素由 Grok/MICU 返回决定。"
-        )
-        if size_mode == "backend":
-            notes.append("Grok 尺寸模式 MICU_GROK_SIZE_MODE=backend：保留后端原始像素。")
-        else:
-            notes.append(
-                f"Grok 保存前会按 MICU_GROK_SIZE_MODE={size_mode} 本地归一化到请求 size={size}。"
-            )
-        if mask_path:
-            notes.append("Grok reference_image 路径当前不支持 mask，已忽略 mask_path。")
-        img_b64 = await asyncio.to_thread(lambda: base64.b64encode(img_bytes).decode())
-        img_data_url = f"data:{img_mime};base64,{img_b64}"
-        status, text = await _call_with_retry(
-            Endpoint(
-                url=f"{baseurl}/v1/images/generations",
-                json_body={
-                    "model": eff_model,
-                    "prompt": prompt,
-                    "n": 1,
-                    "resolution": _grok_resolution(size),
-                    "aspect_ratio": _grok_aspect_ratio(size),
-                    "reference_image": img_data_url,
-                    "response_format": "b64_json",
-                },
-            ),
-            key,
-            retry_pro=True,
-            stream=False,
-            big_size_lock=False,
-            notes_out=notes,
-        )
-        if not (200 <= status < 300):
-            msg = f"HTTP {status}: {_error_detail(text)}"
-            return {
-                "ok": False,
-                "model": eff_model,
-                "size": size,
-                "used_fallback": False,
-                "error": msg,
-                "errors": [msg],
-                "notes": notes,
-            }
-        saved_info, save_err = await _save_first_payload_from_response(
-            text,
-            out_dir,
-            stem,
-            notes,
-            size,
-            normalize_size=size,
-            normalize_mode=size_mode,
-            normalize_label="Grok 图生图",
-        )
-        if save_err:
-            return {"ok": False, "model": eff_model, "size": size, "error": save_err, "errors": [save_err], "notes": notes}
-        return {
-            "ok": True,
-            "model": eff_model,
-            "size": size,
-            "used_fallback": False,
-            "saved": saved_info,
-            "notes": notes,
-        }
     key = _get_key(api_key)
     baseurl = _get_baseurl()
     edge = _max_edge(size)
@@ -1811,7 +1527,7 @@ async def image_edit(
     used_fallback = False
 
     if is_high_res:
-        # ≥2K 路径：走 generations + reference_image 米醋扩展字段（实测 size 真实生效）
+        # ≥2K 路径：走 generations + reference_image 闪艺扩展字段（实测 size 真实生效）
         gen_ep = Endpoint(
             url=f"{baseurl}/v1/images/generations",
             json_body={
@@ -1952,7 +1668,7 @@ async def image_batch_edit(
         size: 输出 size，仅 1K 档。默认 "1024x1024"。
         model: "gpt-image-2" / "gpt-image-2-pro"。留空按 size 自动选。
         save_dir: 输出目录（必须在安全根目录之下）。文件名 batch_<ts>_<idx>.png。
-        api_key: 覆盖 MICU_API_KEY；base_url 已锁在启动期 env，运行期不接受。
+        api_key: 覆盖 SHANYI_API_KEY；base_url 已锁在启动期 env，运行期不接受。
 
     Returns: dict 含：
         ok (bool): True 表示至少 1 张成功。
@@ -1978,11 +1694,7 @@ async def image_batch_edit(
     if len(image_paths) > 20:
         msg = f"image_paths 最多 20 张，收到 {len(image_paths)} 张（防止意外 burn quota）"
         return {"ok": False, "error": msg, "errors": [msg], "total": len(image_paths)}
-    use_grok_request = _is_grok_model(model or DEFAULT_MODEL)
-    if use_grok_request:
-        cleaned_size, size_err = _validate_grok_size(size, allow_none=False)
-    else:
-        cleaned_size, size_err = _validate_size(size, allow_none=False)
+    cleaned_size, size_err = _validate_size(size, allow_none=False)
     if size_err:
         return {"ok": False, "error": size_err, "errors": [size_err], "total": len(image_paths)}
     size = cleaned_size  # type: ignore[assignment]
@@ -1991,9 +1703,6 @@ async def image_batch_edit(
         return {"ok": False, "error": dir_err, "errors": [dir_err], "total": len(image_paths)}
 
     eff_model, notes = _resolve_model(model, size)
-    if _is_grok_model(eff_model):
-        msg = "Grok 模型当前不支持 image_batch_edit 批量逐张编辑；请改用 image_edit 单图、image_multi_reference 多图参考，或改用 gpt-image-2 / gpt-image-2-pro。"
-        return {"ok": False, "error": msg, "errors": [msg], "total": len(image_paths)}
     is_pro = "pro" in eff_model.lower()
     edge = _max_edge(size)
     if edge >= HIGH_RES_EDGE:
@@ -2083,7 +1792,7 @@ async def image_multi_reference(
       想要真 4K 多图融合：两步法 — 此 tool 出 1K/2K 综合图 → image_generate(size="3840x2160") 描述同场景升 4K。
 
     [路由实现]（双路径 + 自动 fallback）
-      - 主路径：/v1/images/generations + image_urls=[...]（米醋扩展字段，size 真实生效）
+      - 主路径：/v1/images/generations + image_urls=[...]（闪艺扩展字段，size 真实生效）
       - 兜底：/v1/chat/completions + 顶层 image_urls + stream:true SSE（永不撞 CF 524，但 size 不生效输出 ~1.57MP）
       - 自动锁 pro：max edge ≥1600 → gpt-image-2-pro
       - 主路径 5xx/524 失败 → 自动 fallback chat stream，notes 标注降级原因
@@ -2092,9 +1801,9 @@ async def image_multi_reference(
     [LIMITS]（当前真实状态，会变化）
       - image_paths 长度 2-10 张。
       - **1K 稳定**：主路径 ~30-100s，size=1024² 实际输出 ~1.57MP。
-      - **2K 不稳定**：主路径 generations + image_urls 在米醋后端间歇 HTTP 500"系统繁忙"；
+      - **2K 不稳定**：主路径 generations + image_urls 在闪艺后端间歇 HTTP 500"系统繁忙"；
         触发 fallback 后改走 chat stream，size 字段被忽略，**实际仍输出 ~1.57MP**。
-      - 单张参考图建议 ≤2MB；总 base64 体积 ≤8MB（米醋代理上限实测约 10MB）。
+      - 单张参考图建议 ≤2MB；总 base64 体积 ≤8MB（闪艺代理上限实测约 10MB）。
 
     Args:
         prompt: 综合指令。例："combine the colors from img1 and the composition from img2 into a sunset cityscape".
@@ -2106,7 +1815,7 @@ async def image_multi_reference(
         model: "gpt-image-2"（默认）/ "gpt-image-2-pro"（≥2K 必需，自动切换）。
         save_dir: 输出目录（必须在安全根目录之下）。
         basename: 文件名前缀（仅 [A-Za-z0-9_-.]，含 / .. 会被拒）。默认 "multiref_<ns_ts>"。
-        api_key: 覆盖 MICU_API_KEY；base_url 已锁在启动期 env，运行期不接受。
+        api_key: 覆盖 SHANYI_API_KEY；base_url 已锁在启动期 env，运行期不接受。
 
     Returns: dict 含：
         ok (bool): 是否成功。
@@ -2144,15 +1853,11 @@ async def image_multi_reference(
     if len(image_paths) > 10:
         msg = f"参考图最多 10 张，当前 {len(image_paths)} 张。请减少或分批。"
         return {"ok": False, "error": msg, "errors": [msg]}
-    use_grok_request = _is_grok_model(model or DEFAULT_MODEL)
-    if use_grok_request:
-        cleaned_size, size_err = _validate_grok_size(size, allow_none=False)
-    else:
-        cleaned_size, size_err = _validate_size(size, allow_none=False)
+    cleaned_size, size_err = _validate_size(size, allow_none=False)
     if size_err:
         return {"ok": False, "error": size_err, "errors": [size_err]}
     size = cleaned_size  # type: ignore[assignment]
-    if not use_grok_request and (rej := _reject_4k_with_reference(size, "image_multi_reference")):
+    if (rej := _reject_4k_with_reference(size, "image_multi_reference")):
         return {"ok": False, "error": rej, "errors": [rej]}
     safe_stem = _safe_basename(basename) if basename is not None else None
     if basename is not None and safe_stem is None:
@@ -2163,93 +1868,6 @@ async def image_multi_reference(
         return {"ok": False, "error": dir_err, "errors": [dir_err]}
 
     eff_model, notes = _resolve_model(model, size)
-    if _is_grok_model(eff_model):
-        key = _get_grok_key(api_key)
-        baseurl = _get_grok_baseurl()
-        stem = safe_stem or _default_basename("multiref")
-        size_mode = _grok_size_mode()
-        image_urls: list[str] = []
-        total_bytes = 0
-        for idx, p_str in enumerate(image_paths):
-            _ip, raw, mime, err = _validate_image_path(p_str, f"image_paths[{idx}]")
-            if err:
-                return {"ok": False, "error": err, "errors": [err]}
-            total_bytes += len(raw)
-            if total_bytes > MAX_TOTAL_INPUT_BYTES:
-                msg = (
-                    f"参考图累计 {total_bytes/1024/1024:.1f}MB 超过总量上限 "
-                    f"{MAX_TOTAL_INPUT_BYTES/1024/1024:.0f}MB（base64 后会膨胀 33%）。请压缩或减少。"
-                )
-                return {"ok": False, "error": msg, "errors": [msg]}
-            ref_b64 = await asyncio.to_thread(lambda r=raw: base64.b64encode(r).decode())
-            image_urls.append(f"data:{mime};base64,{ref_b64}")
-        notes.append(
-            "Grok 多图参考走 /v1/images/generations + image_urls；"
-            "size 只映射为 resolution/aspect_ratio，实际像素由 Grok/MICU 返回决定。"
-        )
-        if size_mode == "backend":
-            notes.append("Grok 尺寸模式 MICU_GROK_SIZE_MODE=backend：保留后端原始像素。")
-        else:
-            notes.append(
-                f"Grok 保存前会按 MICU_GROK_SIZE_MODE={size_mode} 本地归一化到请求 size={size}。"
-            )
-        full_prompt = (
-            "Reference images are provided. Synthesize their visual elements into ONE single new image. "
-            "Do NOT collage, tile, or montage the references side-by-side unless explicitly asked.\n\n"
-            f"Instruction:\n{prompt}"
-        )
-        status, text = await _call_with_retry(
-            Endpoint(
-                url=f"{baseurl}/v1/images/generations",
-                json_body={
-                    "model": eff_model,
-                    "prompt": full_prompt,
-                    "n": 1,
-                    "resolution": _grok_resolution(size),
-                    "aspect_ratio": _grok_aspect_ratio(size),
-                    "image_urls": image_urls,
-                    "response_format": "b64_json",
-                },
-            ),
-            key,
-            retry_pro=True,
-            stream=False,
-            big_size_lock=False,
-            notes_out=notes,
-        )
-        if not (200 <= status < 300):
-            msg = f"HTTP {status}: {_error_detail(text)}"
-            return {
-                "ok": False,
-                "model": eff_model,
-                "size": size,
-                "n_references": len(image_paths),
-                "used_fallback": False,
-                "error": msg,
-                "errors": [msg],
-                "notes": notes,
-            }
-        saved_info, save_err = await _save_first_payload_from_response(
-            text,
-            out_dir,
-            stem,
-            notes,
-            size,
-            normalize_size=size,
-            normalize_mode=size_mode,
-            normalize_label="Grok 多图参考",
-        )
-        if save_err:
-            return {"ok": False, "model": eff_model, "size": size, "error": save_err, "errors": [save_err], "notes": notes}
-        return {
-            "ok": True,
-            "model": eff_model,
-            "size": size,
-            "used_fallback": False,
-            "n_references": len(image_paths),
-            "saved": saved_info,
-            "notes": notes,
-        }
     key = _get_key(api_key)
     baseurl = _get_baseurl()
     is_pro = "pro" in eff_model.lower()
@@ -2279,7 +1897,7 @@ async def image_multi_reference(
         notes.append(f"参考图体积估 {inflated_mb:.1f}MB，部分 serverless 代理可能拒收（一般 4MB 上限）")
 
     # 双路径 + fallback：
-    #   主路径：/v1/images/generations + image_urls （可拿真 2K/4K，但米醋间歇 500/524）
+    #   主路径：/v1/images/generations + image_urls （可拿真 2K/4K，但闪艺间歇 500/524）
     #   兜底：/v1/chat/completions + 顶层 image_urls + stream （永不撞 CF 524，但 size 不生效，输出固定 ~1.57MP）
     full_prompt = (
         f"Reference images are provided. Synthesize their visual elements (style, palette, "
@@ -2310,7 +1928,7 @@ async def image_multi_reference(
     # 只对可恢复的错误 fallback；400/401/403/413 等用户错误直接返回，避免掩盖真因
     if not (200 <= status < 300) and status in RETRYABLE_STATUS:
         # generations 失败 → 走 chat stream 兜底
-        notes.append(f"generations 主路径 HTTP {status}（米醋多图 + 高分辨率间歇拒），已 fallback chat stream（size 不生效，输出 ~1.57MP）")
+        notes.append(f"generations 主路径 HTTP {status}（闪艺多图 + 高分辨率间歇拒），已 fallback chat stream（size 不生效，输出 ~1.57MP）")
         used_fallback = True
         chat_ep = Endpoint(
             url=f"{baseurl}/v1/chat/completions",
@@ -2318,7 +1936,7 @@ async def image_multi_reference(
                 "model": eff_model,
                 "messages": [{"role": "user", "content": full_prompt}],
                 "image_urls": image_urls,
-                "size": size,  # 米醋接受但 chat 路径下不生效
+                "size": size,  # 闪艺接受但 chat 路径下不生效
             },
         )
         status, text = await _call_with_retry(chat_ep, key, retry_pro=is_pro, stream=True)
@@ -2376,24 +1994,19 @@ def server_info() -> dict[str, Any]:
     Returns:
         base_url, default_model, default_save_dir, api_key_configured: 当前配置。
         size_rules: size 字段的硬约束 + 代理实际行为（已通过实测确定）。
-        recommended_sizes: 各 tier 推荐 size（保证 W/H 都是 8 的倍数，米醋约束）。
+        recommended_sizes: 各 tier 推荐 size（保证 W/H 都是 8 的倍数，闪艺约束）。
         capability_matrix: 各 tool × 各 size tier 的可用性。
         retry_policy: 重试与并发策略。
     """
     return {
         "base_url": DEFAULT_BASEURL,
-        "grok_base_url": GROK_BASEURL,
         "default_model": DEFAULT_MODEL,
-        "grok_default_model": XAI_MODEL,
-        "grok_size_mode": _grok_size_mode(),
         "available_models": [NONPRO_MODEL, PRO_MODEL],
-        "grok_available_models": GROK_AVAILABLE_MODELS,
         "default_save_dir": str(DEFAULT_SAVE_DIR),
         "api_key_configured": bool(API_KEY),
-        "grok_api_key_configured": bool(GROK_API_KEY),
         "size_rules": {
             "format": "WxH 字符串（如 '1024x1024'）",
-            "alignment": f"W 与 H 都必须是 {SIZE_ALIGNMENT} 的整数倍（米醋实测约束，OpenAI 官方要 16）",
+            "alignment": f"W 与 H 都必须是 {SIZE_ALIGNMENT} 的整数倍（闪艺实测约束，OpenAI 官方要 16）",
             "edge_range": f"W/H 必须在 [{MIN_SIZE_EDGE}, {MAX_SIZE_EDGE}] 范围内",
             "compress_below_2_25mp": (
                 "请求总像素 ≤ 2.25MP（如 1024² / 1280×720 / 1500² / 1920×1080）会被代理"
@@ -2409,7 +2022,7 @@ def server_info() -> dict[str, Any]:
         "safety_constraints": {
             "n_range": f"image_generate 的 n ∈ [1, {MAX_N}]，超出立即拒（防 burn quota）",
             "save_dir_root": (
-                f"所有输出强制落在 MICU_SAVE_DIR_ROOT={_SAVE_ROOT} 之下；"
+                f"所有输出强制落在 SHANYI_SAVE_DIR_ROOT={_SAVE_ROOT} 之下；"
                 "传 root 之外路径会被拒"
             ),
             "basename_charset": "basename 仅允许 [A-Za-z0-9_-.]，禁含 / .. 和路径分量",
@@ -2419,15 +2032,13 @@ def server_info() -> dict[str, Any]:
             ),
             "input_image_validation": "所有输入图按 magic bytes 校验为 PNG/JPEG/WebP/GIF；非图片立即拒（防本地任意文件外传）",
             "response_size_limit": f"远端响应 ≤{MAX_RESPONSE_BYTES//1024//1024}MB；超过中断不落盘",
-            "base_url_locked": "base_url 锁在启动期 MICU_BASEURL env，运行期 tool 不接受参数（防 key 外泄到攻击者 host）",
+            "base_url_locked": "base_url 锁在启动期 SHANYI_BASEURL env，运行期 tool 不接受参数（防 key 外泄到攻击者 host）",
         },
         "recommended_sizes": {
             "1k_福利档_约1.57MP": sorted(VALID_SIZES_1K),
             "2k_仅pro_严格1_1": sorted(VALID_SIZES_2K),
             "4k_仅pro_严格1_1": sorted(VALID_SIZES_4K),
             "tip": "想拿到精确分辨率请选 2K/4K 档；选 1K 档会被代理统一拉到 1.57MP。",
-            "grok_tip": "Grok 路径按 aspect_ratio + resolution(1k/2k) 映射，不强制 8 倍数，size 仅用于本地路由选择。",
-            "grok_actual_size_tip": "实测 Grok 返回像素不严格等于请求 WxH；以 saved.actual_size 为准。",
         },
         "capability_matrix": {
             "image_generate": {
@@ -2435,26 +2046,20 @@ def server_info() -> dict[str, Any]:
                 "2k_pro": "可用，single 40-60s，N=1 强制；origin 拥塞撞 524 时自动 fallback 到 chat stream（输出 ~1.57MP，notes 里有标记）",
                 "4k_pro": "可用，single 50-80s，N=1 强制；偶尔 524 自动重试",
             },
-            "grok_image_generate": {
-                "1k": f"可用，默认 model={XAI_MODEL}，resolution=1k，按 aspect_ratio 自动选图",
-                "2k": "可用，resolution=2k，按 aspect_ratio 自动选图；实际像素以返回图片为准",
-                "4k": "不支持；Grok 目前只开放 1k / 2k",
-            },
             "image_edit": {
-                "1k": "gpt-image-2 可用，~10s，edits multipart + 可选 alpha mask；Grok 模型走 generations + reference_image（无 mask）",
-                "2k_pro": "gpt-image-2 可用，generations + reference_image 字段，~50s 真 1:1（不支持 mask）；Grok 映射到 resolution=2k",
-                "4k_pro": "gpt-image-2 已禁用：origin 处理 4K + 参考图稳定 > 120s 撞 CF；Grok 不拒绝 WxH，但只映射到 resolution=2k",
+                "1k": "可用，~10s，edits multipart + 可选 alpha mask",
+                "2k_pro": "可用，generations + reference_image 字段，~50s 真 1:1（不支持 mask）",
+                "4k_pro": "已禁用：origin 处理 4K + 参考图稳定 > 120s 撞 CF",
             },
             "image_batch_edit": {
                 "1k_non_pro": "5 并发",
                 "1k_pro": "串行 + 1.5s gap",
                 ">=2k": "拒绝",
-                "grok": "当前不支持 Grok 批量逐张编辑；请用 image_edit 单图循环或 image_multi_reference。",
             },
             "image_multi_reference": {
-                "1k": "gpt-image-2 稳定可用，2-10 张参考图融合输出 1 张；Grok 模型走 generations + image_urls",
-                "2k_pro": "gpt-image-2 可用但 origin 间歇 500，失败自动 fallback；Grok 映射到 resolution=2k",
-                "4k_pro": "gpt-image-2 已禁用：origin 处理 4K 多图融合稳定 > 120s 撞 CF；Grok 不拒绝 WxH，但只映射到 resolution=2k",
+                "1k": "稳定可用，2-10 张参考图融合输出 1 张",
+                "2k_pro": "可用但 origin 间歇 500，失败自动 fallback",
+                "4k_pro": "已禁用：origin 处理 4K 多图融合稳定 > 120s 撞 CF",
             },
         },
         "retry_policy": {
@@ -2464,16 +2069,15 @@ def server_info() -> dict[str, Any]:
             "trigger": "model 含 'pro' 或 size tier ∈ {2k, 4k}",
             "concurrency_2k_4k": (
                 "双层锁: (1) 进程内 asyncio.Semaphore(1) 同 MCP 进程内并发本地排队; "
-                "(2) 跨进程文件锁 @ ~/.cache/micu-image/bigsize.lock，POSIX 用 fcntl.flock，"
+                "(2) 跨进程文件锁 @ ~/.cache/shanyi-image/bigsize.lock，POSIX 用 fcntl.flock，"
                 "Windows 用 msvcrt.locking —— 多 Claude Code/Codex 窗口各自独立 MCP 子进程时"
                 "跨进程串行打 origin，整机任意时刻只有一张 ≥2K 在 origin 排队。"
             ),
         },
         "response_handling": {
-            "saved_to_disk": "所有生成的图片落盘到 save_dir（默认 cwd/out 或 MICU_SAVE_DIR）",
+            "saved_to_disk": "所有生成的图片落盘到 save_dir（默认 cwd/out 或 SHANYI_SAVE_DIR）",
             "actual_size_field": "返回的 saved[].actual_size 是从 PNG/JPEG header 读出的真实像素，可与请求 size 对比验证",
             "extract_paths": "支持 data[].b64_json / data[].url / chat content markdown 三种响应格式",
-            "grok_extract_paths": "Grok 也支持 data[].b64_json / data[].url，size 由本地映射到 resolution/aspect_ratio",
         },
     }
 

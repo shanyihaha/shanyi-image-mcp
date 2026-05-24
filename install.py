@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""米醋画图 MCP 一键安装脚本。
+"""闪艺画图 MCP 一键安装脚本。
 
 跨平台（macOS / Linux / Windows）：
 - 自动 pip install 依赖（实时输出 / 可选国内镜像）
 - 交互问 API key + 输出目录（脱敏二次确认）
 - 自动写入 Claude Code / Codex CLI 配置（已存在则备份再合并）
-- 同步设置 MICU_SAVE_DIR_ROOT 沙箱根，避免自定义目录被沙箱拒
+- 同步设置 SHANYI_SAVE_DIR_ROOT 沙箱根，避免自定义目录被沙箱拒
 - 自检 server 能不能起来 + 给出脱敏摘要
 - 检测 Claude Code / Codex 进程并提示先关再启
-- 可选顺带配置米醋 Grok 图像通道 token
 
 用法：
     python install.py
@@ -17,8 +16,7 @@
     python install.py --no-codex                   # 不写 Codex 配置
     python install.py --no-claude                  # 不写 Claude 配置
     python install.py --yes                        # 非交互, 全用环境变量
-        MICU_API_KEY=... MICU_SAVE_DIR=... python install.py --yes
-        MICU_GROK_API_KEY=... python install.py --yes
+        SHANYI_API_KEY=... SHANYI_SAVE_DIR=... python install.py --yes
 """
 from __future__ import annotations
 
@@ -42,10 +40,7 @@ PIP_MIRRORS = {
     "default": None,
 }
 
-DEFAULT_BASEURL = "https://www.micuapi.ai"
-DEFAULT_GROK_MODEL = "grok-imagine-image-lite"
-DEFAULT_GROK_SIZE_MODE = "contain"
-GROK_SIZE_MODES = {"backend", "contain", "cover", "stretch"}
+DEFAULT_BASEURL = "https://shanyiapi.com"
 
 
 # ---------- 日志输出 ----------
@@ -176,69 +171,22 @@ def ask_yes_no(prompt: str, default: bool = True) -> bool:
             return False
 
 
-def collect_grok_config(non_interactive: bool) -> dict[str, str]:
-    if non_interactive:
-        grok_key = os.environ.get(
-            "MICU_GROK_API_KEY",
-            os.environ.get("XAI_API_KEY", os.environ.get("GROK_API_KEY", "")),
-        ).strip()
-        if not grok_key:
-            return {}
-        return {
-            "MICU_GROK_API_KEY": grok_key,
-            "XAI_MODEL": os.environ.get("XAI_MODEL", os.environ.get("GROK_MODEL", DEFAULT_GROK_MODEL)).strip() or DEFAULT_GROK_MODEL,
-            "MICU_GROK_SIZE_MODE": _clean_grok_size_mode(os.environ.get("MICU_GROK_SIZE_MODE", DEFAULT_GROK_SIZE_MODE)),
-        }
-
-    if not ask_yes_no("同时配置米醋 Grok 生图通道?", default=False):
-        return {}
-    print("\n=== 配置米醋 Grok 生图通道 ===")
-    info("Grok 图像 token 在米醋后台获取；baseurl 与 image2 共用 MICU_BASEURL")
-    while True:
-        grok_key = ask("米醋 Grok token (sk-...)", secret=True)
-        if not grok_key:
-            warn("Grok token 为空，已跳过")
-            return {}
-        preview = mask_key(grok_key)
-        if not grok_key.startswith("sk-"):
-            warn(f"Grok token 不以 sk- 开头，可能粘错: {preview}")
-        else:
-            info(f"输入的 Grok token: {preview}")
-        if ask_yes_no("确认这个 Grok token?", default=True):
-            break
-    grok_model = ask("Grok model", default=DEFAULT_GROK_MODEL)
-    grok_size_mode = ask("Grok size mode (contain/cover/stretch/backend)", default=DEFAULT_GROK_SIZE_MODE)
-    return {
-        "MICU_GROK_API_KEY": grok_key,
-        "XAI_MODEL": grok_model or DEFAULT_GROK_MODEL,
-        "MICU_GROK_SIZE_MODE": _clean_grok_size_mode(grok_size_mode),
-    }
-
-
-def _clean_grok_size_mode(value: str) -> str:
-    mode = (value or DEFAULT_GROK_SIZE_MODE).strip().lower()
-    if mode not in GROK_SIZE_MODES:
-        warn(f"未知 MICU_GROK_SIZE_MODE={value!r}，已使用 {DEFAULT_GROK_SIZE_MODE}")
-        return DEFAULT_GROK_SIZE_MODE
-    return mode
-
-
 def collect_config(non_interactive: bool, baseurl: str) -> tuple[dict[str, str], str, str]:
     """返回 (env_dict, save_dir, save_dir_root)."""
     home = Path.home()
-    default_save = home / "Pictures" / "micu-out"
+    default_save = home / "Pictures" / "shanyi-image-out"
 
     if non_interactive:
-        api_key = os.environ.get("MICU_API_KEY", "").strip()
-        save_dir_raw = os.environ.get("MICU_SAVE_DIR", str(default_save)).strip()
+        api_key = os.environ.get("SHANYI_API_KEY", "").strip()
+        save_dir_raw = os.environ.get("SHANYI_SAVE_DIR", str(default_save)).strip()
         if not api_key:
-            err("--yes 模式需要环境变量 MICU_API_KEY=sk-...")
+            err("--yes 模式需要环境变量 SHANYI_API_KEY=sk-...")
     else:
-        print("\n=== 配置米醋 MCP ===")
+        print("\n=== 配置闪艺 MCP ===")
         info(f"baseurl: {baseurl}")
-        info("API key 在米醋后台拿: https://www.micuapi.ai")
+        info("API key 在闪艺后台拿: https://shanyiapi.com")
         while True:
-            api_key = ask("米醋 API key (sk-...)", secret=True)
+            api_key = ask("闪艺 API key (sk-...)", secret=True)
             if not api_key:
                 warn("API key 不能为空")
                 continue
@@ -257,18 +205,17 @@ def collect_config(non_interactive: bool, baseurl: str) -> tuple[dict[str, str],
     except OSError as e:
         err(f"创建输出目录失败: {save_path}\n{e}")
 
-    # MICU_SAVE_DIR_ROOT: 默认 = save_dir 自身, 让 server 沙箱不会拒
+    # SHANYI_SAVE_DIR_ROOT: 默认 = save_dir 自身, 让 server 沙箱不会拒
     save_root = str(save_path)
     ok(f"输出目录: {save_path}")
     ok(f"沙箱根目录: {save_root}")
     env = {
-        "MICU_API_KEY": api_key,
-        "MICU_SAVE_DIR": str(save_path),
-        "MICU_SAVE_DIR_ROOT": save_root,
+        "SHANYI_API_KEY": api_key,
+        "SHANYI_SAVE_DIR": str(save_path),
+        "SHANYI_SAVE_DIR_ROOT": save_root,
     }
     if baseurl != DEFAULT_BASEURL:
-        env["MICU_BASEURL"] = baseurl
-    env.update(collect_grok_config(non_interactive))
+        env["SHANYI_BASEURL"] = baseurl
     return env, str(save_path), save_root
 
 
@@ -298,9 +245,9 @@ def write_claude(server_path: str, env_dict: dict) -> Path:
         if not isinstance(data, dict):
             err("~/.claude.json 顶层不是 object, 备份已留, 请手动检查")
     servers = data.setdefault("mcpServers", {})
-    if "micu-image" in servers:
-        info("已存在 micu-image 配置, 覆盖")
-    servers["micu-image"] = {
+    if "shanyi-image" in servers:
+        info("已存在 shanyi-image 配置, 覆盖")
+    servers["shanyi-image"] = {
         "command": sys.executable,
         "args": [server_path],
         "env": env_dict,
@@ -321,25 +268,25 @@ def write_codex(server_path: str, env_dict: dict) -> Path:
 
     env_lines = "\n".join(f"{k} = {tstr(v)}" for k, v in env_dict.items())
     block = (
-        "\n[mcp_servers.micu-image]\n"
+        "\n[mcp_servers.shanyi-image]\n"
         f"command = {tstr(sys.executable)}\n"
         f"args = [{tstr(server_path)}]\n"
-        "\n[mcp_servers.micu-image.env]\n"
+        "\n[mcp_servers.shanyi-image.env]\n"
         f"{env_lines}\n\n"
     )
 
     if cfg.exists():
         existing = cfg.read_text(encoding="utf-8")
-        if "[mcp_servers.micu-image]" in existing:
+        if "[mcp_servers.shanyi-image]" in existing:
             _backup(cfg)
             pattern = re.compile(
-                r"(?m)^\[mcp_servers\.micu-image\]\n"
+                r"(?m)^\[mcp_servers\.shanyi-image\]\n"
                 r"(?:(?!^\[)[^\n]*\n)*"
-                r"(?:^\[mcp_servers\.micu-image\.env\]\n(?:(?!^\[)[^\n]*\n)*)?"
+                r"(?:^\[mcp_servers\.shanyi-image\.env\]\n(?:(?!^\[)[^\n]*\n)*)?"
             )
             updated, count = pattern.subn(block.lstrip(), existing, count=1)
             if count != 1:
-                warn("已存在 [mcp_servers.micu-image]，但自动定位旧节失败，跳过以免破坏配置")
+                warn("已存在 [mcp_servers.shanyi-image]，但自动定位旧节失败，跳过以免破坏配置")
                 warn(f"请手动编辑 {cfg}")
                 return cfg
             cfg.write_text(updated, encoding="utf-8")
@@ -397,16 +344,11 @@ def summary(env_dict: dict, claude_cfg: Path | None, codex_cfg: Path | None,
     print("\n=== 完成 ===")
     print(f"  python      : {sys.executable}")
     print(f"  server.py   : {server_path}")
-    print(f"  api key     : {mask_key(env_dict.get('MICU_API_KEY', ''))}")
-    print(f"  save_dir    : {env_dict.get('MICU_SAVE_DIR', '')}")
-    print(f"  save_root   : {env_dict.get('MICU_SAVE_DIR_ROOT', '')}")
-    if "MICU_BASEURL" in env_dict:
-        print(f"  baseurl     : {env_dict['MICU_BASEURL']}")
-    if "MICU_GROK_API_KEY" in env_dict:
-        print(f"  grok key    : {mask_key(env_dict.get('MICU_GROK_API_KEY', ''))}")
-        print(f"  grok model  : {env_dict.get('XAI_MODEL', '')}")
-        print(f"  grok size   : {env_dict.get('MICU_GROK_SIZE_MODE', DEFAULT_GROK_SIZE_MODE)}")
-        print(f"  grok base   : {env_dict.get('MICU_BASEURL', DEFAULT_BASEURL)}")
+    print(f"  api key     : {mask_key(env_dict.get('SHANYI_API_KEY', ''))}")
+    print(f"  save_dir    : {env_dict.get('SHANYI_SAVE_DIR', '')}")
+    print(f"  save_root   : {env_dict.get('SHANYI_SAVE_DIR_ROOT', '')}")
+    if "SHANYI_BASEURL" in env_dict:
+        print(f"  baseurl     : {env_dict['SHANYI_BASEURL']}")
     if claude_cfg:
         print(f"  Claude 配置 : {claude_cfg}")
     if codex_cfg:
@@ -421,24 +363,24 @@ def summary(env_dict: dict, claude_cfg: Path | None, codex_cfg: Path | None,
 # ---------- main ----------
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="米醋画图 MCP 一键安装")
+    p = argparse.ArgumentParser(description="闪艺画图 MCP 一键安装")
     p.add_argument("--no-claude", action="store_true", help="不写 Claude Code 配置")
     p.add_argument("--no-codex", action="store_true", help="不写 Codex CLI 配置")
     p.add_argument("--no-smoke", action="store_true", help="跳过自检")
     p.add_argument("--yes", action="store_true",
-                   help="非交互模式 (从环境变量读 MICU_API_KEY / MICU_SAVE_DIR；可选 MICU_GROK_API_KEY)")
+                   help="非交互模式 (从环境变量读 SHANYI_API_KEY / SHANYI_SAVE_DIR)")
     p.add_argument("--mirror", choices=list(PIP_MIRRORS.keys()), default="default",
                    help=f"pip 镜像 (默认: 官方源). 可选: {', '.join(k for k in PIP_MIRRORS if k != 'default')}")
     p.add_argument("--pypi-index", default=None, help="自定义 pip index URL (覆盖 --mirror)")
     p.add_argument("--baseurl", default=DEFAULT_BASEURL,
-                   help=f"米醋代理 baseurl (默认 {DEFAULT_BASEURL})")
+                   help=f"闪艺代理 baseurl (默认 {DEFAULT_BASEURL})")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    print("=== 米醋画图 MCP 一键安装 ===\n")
+    print("=== 闪艺画图 MCP 一键安装 ===\n")
     check_python()
     check_pip()
     check_running_clients()
