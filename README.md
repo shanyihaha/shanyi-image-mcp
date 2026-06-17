@@ -69,7 +69,7 @@ python install.py --yes
 python install.py --no-codex
 python install.py --no-claude
 python install.py --mirror tsinghua
-python install.py --baseurl https://shanyiapi.com
+python install.py --baseurl https://direct.shanyiapi.com
 ```
 
 安装完成后重启 Claude Code / Codex，让 LLM 调 `server_info` 验证。
